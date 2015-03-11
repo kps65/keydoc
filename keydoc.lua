@@ -99,9 +99,34 @@ function keydoc.group(name)
 	return {}
 end
 
+-- match key against the given pattern
+local function match_key(key,pattern)
+	-- no pattern given
+	if not pattern then return true end
+
+	pattern = string.lower(pattern)
+
+	-- eval key when single char given
+	if string.len(pattern) == 1 then
+		if key.key == pattern or key.keysym == pattern
+		then return true
+		else return false end
+	-- eval help and key when string given
+	elseif string.find(string.lower(doc[key].help),pattern)
+	or string.find(string.lower(key.key),pattern)
+	or string.find(string.lower(key.keysym),pattern)
+	then return true
+	else return false end
+end
+
 local fg_key, fg_doc, fg_group -- markup colors
-local function markup(keys)
+local function markup(keys,pattern)
 	local result = {}
+
+	-- set markup colors
+	fg_key = keydoc.color.fg_key or beautiful.fg_end_widget
+	fg_doc = keydoc.color.fg_doc or beautiful.fg_widget
+	fg_group = keydoc.color.fg_group or beautiful.fg_widget
 
 	-- Compute longest key combination
 	local longest = 0
@@ -116,14 +141,18 @@ local function markup(keys)
 		if doc[key] then
 			local help, group = doc[key].help, doc[key].group
 			local skey = key2str(key)
+			-- match key against pattern
+			if match_key(key,pattern) then
 			result[group] = (result[group] or "") ..
 				'<span font="'..keydoc.font..
 				'" color="'..fg_key..'"> '..
 				string.format(
 					"%"..(longest - unilen(skey))..
-					"s%s%2s", "",skey,"")..
+					"s%s%2s", "",skey,""
+				)..
 				' </span><span color="'..fg_doc..'">'.. 
 				help .. '</span>\n'
+			end
 		end
 	end
 
@@ -190,24 +219,16 @@ end
 -- height. If the help text does not fit, it will be splitted to
 -- several notifications shown one by one on mouse click.
 --
--- notification parameters:
--- 	timeout - notification timeout
--- 	bg - notification background color
--- other parameters can be changed through naughty config and preset
---
-function keydoc.display(args)
+local function compose(pattern,args)
 	args = args or {} -- naughty args
-
-	-- set markup colors
-	fg_key = keydoc.color.fg_key or beautiful.fg_end_widget
-	fg_doc = keydoc.color.fg_doc or beautiful.fg_widget
-	fg_group = keydoc.color.fg_group or beautiful.fg_widget
 
 	-- help strings
 	local strings = markup(awful.util.table.join(
 		capi.root.keys(),
 		capi.client.focus and capi.client.focus:keys() or {}
-	))
+		),
+		pattern
+	)
 
 	-- calculate maximum height
 	local preset = awful.util.table.join(naughty.config.defaults or {},
@@ -218,9 +239,15 @@ function keydoc.display(args)
 
 	-- compose text blocks fit to maximum height
 	local result, ii = { "" }, 1
+	if pattern then
+		result[ii] = '<span weight="bold" color="'..fg_key..'">'..
+			"Keys matching '"..pattern.."'".."</span>\n"
+	end
+	local txt = nil
 	for group, res in spairs(strings) do
+		empty = false
 		if #result[ii] > 0 then result[ii] = result[ii] .. "\n" end
-		local txt = '<span weight="bold" color="'..fg_group..'">'..
+		txt = '<span weight="bold" color="'..fg_group..'">'..
 			group .. "</span>\n" .. res
 		if check_size(result[ii]..txt,maxheight) then
 			result[ii] = result[ii] .. txt
@@ -231,6 +258,10 @@ function keydoc.display(args)
 			ii = ii + 1
 			result[ii] = txt
 		end
+	end
+	if not txt then -- no keys in strings
+		result[ii] = result[ii]..'<span color="'..fg_key..'">'..
+			"Not found".."</span>"
 	end
 
 	-- construct notification calls for every text block
@@ -244,7 +275,22 @@ function keydoc.display(args)
 	end
 	-- execute notification chain
 	call[1]()
+end
 
+-- Display the complete help message
+-- notification parameters accepted by args:
+-- 	timeout - notification timeout
+-- 	bg - notification background color
+-- other parameters can be changed through naughty config and preset
+--
+function keydoc.display(args) compose(false,args) end
+
+-- Display help for keys corresponding with the pattern entered
+function keydoc.search(args)
+	awful.prompt.run({prompt = " Search key help: "},
+		mypromptbox[mouse.screen].widget,
+		function(str) compose(str,args) end
+	)
 end
 
 return keydoc
