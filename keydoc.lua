@@ -196,21 +196,71 @@ local function check_size(txt,height)
 end
 
 -- show notification
--- 	args: timeout, bg, run
+-- 	args: timeout, bg
+-- 	control keys:
+-- 		Esc - dismiss
+-- 		space - next notification (if exists)
+-- 		/ - run keydoc.search
+--
 local notif = {}
 local function show(txt,run,args)
 	args = args or {} -- naughty args
+
 	-- check message body
 	if not txt then
 		if notif then naughty.destroy(notif) end
 		return false
 	end
+	-- assign timeout for naughty and keygrabber
+	local timeout = args.timeout or 30
+
+	--{ control notification by keys
+	local keytimer = false
+	-- stop grabbing keys on timer (timeout = naughty timeout)
+	if timeout ~= 0 then
+		keytimer = timer({ timeout = timeout })
+		keytimer:connect_signal("timeout", function()
+			keytimer:stop()
+			keygrabber.stop()
+		end)
+		keytimer:start()
+	end
+	-- catch some keys
+	local catch = function(mod,key,event)
+		if event == "release" then return end
+		keygrabber.stop()
+		if keytimer then keytimer:stop() end
+		if key == "/" then
+			-- help search
+			naughty.destroy(notif)
+			keydoc.search(args)
+		elseif key == " " then
+			-- paging
+			if run then run()
+			else naughty.destroy(notif) end
+		elseif key == "Escape" then
+			-- dismiss help
+			naughty.destroy(notif)
+		else
+			return false
+		end
+	end
+	keygrabber.run(catch)
+	--}
+
 	-- show notification
 	notif = naughty.notify({
 		text = txt,
 		replaces_id = notif.id,
-		run = run or naughty.destroy(self),
-		timeout = args.timeout or 30,
+		run = function()
+			-- stop grabbing keys
+			keygrabber.stop()
+			if keytimer then keytimer:stop() end
+			-- perform run action
+			if run then run()
+			else naughty.destroy(notif) end
+		end,
+		timeout = timeout,
 		bg = args.bg or beautiful.bg_focus,
 	})
 end
